@@ -1,0 +1,69 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      # postgres/postgres/santerra matches app/database/db.py's
+      # DEFAULT_DATABASE_URL exactly, so scripts/*.py run from a local venv
+      # against this same compose-managed database with zero config -- no
+      # DATABASE_URL needed unless POSTGRES_PASSWORD is overridden below.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: santerra
+    ports:
+      # Exposed so those scripts can reach it from the host, not just from
+      # inside the api container. Change the host side if 5432 is already
+      # taken locally.
+      - "5432:5432"
+    volumes:
+      # Named volume, not a bind mount -- Postgres's own data directory
+      # layout isn't meant to be poked at from the host. Survives
+      # `docker compose down`; `docker compose down -v` wipes it.
+      - santerra-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  api:
+    build: .
+    image: santerra-listing-ai:latest
+    command: ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "8000:8000"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY:?set GROQ_API_KEY in .env -- see .env.example}
+      GROQ_MODEL: ${GROQ_MODEL:-}
+      GROQ_CRITIC_MODEL: ${GROQ_CRITIC_MODEL:-}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/santerra
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build: .
+    image: santerra-listing-ai:latest
+    command: ["python", "-m", "streamlit", "run", "frontend/streamlit_app.py", "--server.port", "8501", "--server.address", "0.0.0.0"]
+    ports:
+      - "8501:8501"
+    environment:
+      # The only thing the frontend needs -- it talks to the API over HTTP,
+      # never touches the DB or GROQ_API_KEY directly (see
+      # frontend/streamlit_app.py's module docstring).
+      API_BASE_URL: http://api:8000
+      STREAMLIT_BROWSER_GATHER_USAGE_STATS: "false"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  santerra-db-data:

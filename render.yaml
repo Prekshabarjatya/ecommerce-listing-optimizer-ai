@@ -1,0 +1,62 @@
+# Render Blueprint (https://render.com/docs/blueprint-spec) -- one-click
+# public deployment: a managed Postgres, the FastAPI backend (app/api.py),
+# and the Streamlit review UI (frontend/streamlit_app.py), all built from
+# the same Dockerfile docker-compose.yml uses locally.
+#
+# IMPORTANT -- read before deploying: `plan: free` on the database below
+# means Render expires it 30 days after creation and deletes it (with all
+# your catalogue data) 14 days after that if it isn't upgraded by then --
+# https://render.com/docs/free. That defeats the entire point of moving off
+# SQLite for this project (see app/database/schema.py's Stage 9 note): the
+# reason to pay for Postgres here isn't the compute, it's that the data
+# survives. Change `plan: free` to a paid Postgres plan (e.g. `basic-256mb`)
+# before deploying anything you intend to keep.
+#
+# The two web services default to `plan: free` too -- fine for a portfolio
+# demo (Render just spins them down after 15 min idle and cold-starts on
+# the next request), upgrade if that latency matters to you.
+
+databases:
+  - name: santerra-db
+    plan: free # see the warning above -- upgrade this for real data
+    databaseName: santerra
+    user: santerra
+
+services:
+  - name: santerra-api
+    type: web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "python -m uvicorn app.api:app --host 0.0.0.0 --port $PORT"
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: santerra-db
+          property: connectionString
+      # Secrets -- sync: false means Render prompts for these during
+      # blueprint setup / lets you fill them in from the dashboard
+      # afterward, rather than committing them to this file.
+      - key: GROQ_API_KEY
+        sync: false
+      - key: GROQ_MODEL
+        sync: false
+      - key: GROQ_CRITIC_MODEL
+        sync: false
+
+  - name: santerra-review-ui
+    type: web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "python -m streamlit run frontend/streamlit_app.py --server.port $PORT --server.address 0.0.0.0"
+    plan: free
+    envVars:
+      # hostport is "host:port" over Render's private network, not a full
+      # URL -- frontend/streamlit_app.py normalizes it at startup.
+      - key: API_BASE_URL
+        fromService:
+          name: santerra-api
+          type: web
+          property: hostport
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: "false"

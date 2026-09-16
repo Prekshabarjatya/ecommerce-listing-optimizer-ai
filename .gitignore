@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
+
+# Raw and processed catalogue data may contain proprietary pricing/product
+# info — never commit real exports, only the pipeline that produces them.
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Local product-master database — same proprietary-data reasoning as above.
+data/*.db
+data/*.db-journal
+data/*.db-wal
+.env
+
+# Eval set/labels are generated from real catalogue listings — same
+# proprietary-data reasoning as data/raw and data/processed.
+eval/*.csv
+!eval/.gitkeep
